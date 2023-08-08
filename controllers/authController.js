@@ -1,15 +1,17 @@
+require('dotenv').config();
 const generateJWT = require('../helpers/generateJWT');
 const generateTokenRandom = require('../helpers/generateTokenRandom');
+const nodemailer = require('nodemailer');
 const User = require('../models/User');
 const createError = require('http-errors');
 
 const register = async (req, res) => {
-    
+
 
     try {
         const { name, email, password } = req.body
 
-        if ([name, email, password].includes("")|| !name || !email || !password ) {
+        if ([name, email, password].includes("") || !name || !email || !password) {
             throw createError(400, "Todos los campos son obligatorios")
         }
         let user = await User.findOne({
@@ -41,48 +43,102 @@ const register = async (req, res) => {
 
 
 }
-const login = async (req, res)=> {
-    
- try {
-    console.log(req.body);
-    const { email, password } = req.body;
+const login = async (req, res) => {
 
-    if ([email, password].includes("")|| !email || !password ) {
-        throw createError(400, "Todos los campos son obligatorios")
-    }
-    let user = await User.findOne({
-        email
-    }).populate('favorites')
-    if(!user){
-        throw createError(400, "Usuario inexistente")
-    }
-    if(await user.checkedPassword(password)){
-        return  res.status(200).json({
-            ok : true,
-            token : generateJWT({
-                user : {
-                    id : user._id,
-                    name : user.name,
-                    favorites : user.favorites ? user.favorites.map(favorite => favorite.drink) : []
-                }
+    try {
+        console.log(req.body);
+        const { email, password } = req.body;
+
+        if ([email, password].includes("") || !email || !password) {
+            throw createError(400, "Todos los campos son obligatorios")
+        }
+        let user = await User.findOne({
+            email
+        }).populate('favorites')
+        if (!user) {
+            throw createError(400, "Usuario inexistente")
+        }
+        if (await user.checkedPassword(password)) {
+            return res.status(200).json({
+                ok: true,
+                token: generateJWT({
+                    user: {
+                        id: user._id,
+                        name: user.name,
+                        favorites: user.favorites ? user.favorites.map(favorite => favorite.drink) : []
+                    }
+                })
             })
+        } else {
+            throw createError(403, "Credenciales invalidas")
+        }
+
+    } catch (error) {
+        return res.status(error.status || 500).json({
+            ok: false,
+            message: error.message || "Upss, Credenciales invalidas"
         })
-    }else{
-        throw createError(403,"Credenciales invalidas")
     }
 
- } catch (error) {
-    return res.status(error.status || 500).json({
-        ok : false,
-        message : error.message || "Upss, Credenciales invalidas"
-    })
- }
-
 
 
 }
 
+const forgotPassword = async (req, res) => {
+    try {
+        const { email } = req.body;
+
+        // Verificar si el usuario existe en la base de datos
+        const user = await User.findOne({ email });
+        if (!user) {
+            throw createError(400, "El usuario con este correo electrónico no existe.");
+        }
+
+        // Generar un token de recuperación de contraseña (por ejemplo, un token aleatorio)
+        const resetToken = generateTokenRandom();
+
+        // Guardar el token de recuperación en el usuario
+        user.resetPasswordToken = resetToken;
+        user.resetPasswordExpires = Date.now() + 3600000; // Expira en 1 hora
+
+        await user.save();
+
+        // Configurar el transporte de Nodemailer con la configuración adecuada
+        const transporter = nodemailer.createTransport({
+            service: 'Gmail',
+            auth: {
+              user: process.env.EMAIL_USER, // Utiliza la variable de entorno EMAIL_USER
+              pass: process.env.EMAIL_PASSWORD // Utiliza la variable de entorno EMAIL_PASSWORD
+            }
+          });
+
+        // Configurar el contenido del correo electrónico
+        const mailOptions = {
+            from: process.env.EMAIL_USER, // Tu dirección de correo electrónico
+            to: email, // El correo electrónico del usuario que solicitó la recuperación de contraseña
+            subject: 'Recuperación de contraseña',
+            text: `Haz clic en el siguiente enlace para restablecer tu contraseña: http://localhost:3000/reset-password?token=${resetToken}`,
+            // Puedes personalizar el contenido del correo electrónico según tus necesidades.
+            // También puedes enviar un correo electrónico en formato HTML.
+        };
+
+        // Envía el correo electrónico
+        await transporter.sendMail(mailOptions);
+
+        return res.status(200).json({
+            ok: true,
+            message: "Se ha enviado un correo electrónico con las instrucciones para restablecer la contraseña.",
+        });
+    } catch (error) {
+        return res.status(error.status || 500).json({
+            ok: false,
+            message: error.message || "Upss, hubo un error al solicitar la recuperación de contraseña.",
+        });
+    }
+};
 module.exports = {
-register,
-login
-}
+    register,
+    login,
+    forgotPassword, // Agrega el nuevo endpoint aquí
+};
+
